@@ -1,5 +1,6 @@
 // control_page.dart
 import 'package:flutter/material.dart';
+import 'services/bluetooth_service.dart';
   // Reuse your color palette
 const Color darkerGreen = Color(0xFF063B00);
 const Color darkGreen   = Color(0xFF266210);
@@ -41,6 +42,57 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   bool isPoweredOn = true;
+  bool _isConnected = false;
+  String _temperature = '190 °C';
+  String _currentProcess = 'HEATING';
+  String _nextProcess = 'COOLING';
+  String _nextCycle = '01:10:32';
+  // ... keep your existing `isPoweredOn`
+
+  StreamSubscription<String>? _dataSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _dataSubscription = BluetoothService.dataStream.listen((data) {
+      // Parse incoming data and update state
+      setState(() {
+        if (data.startsWith('TEMP:')) {
+          _temperature = '${data.substring(5)} °C';
+        } else if (data.startsWith('PROCESS:')) {
+          _currentProcess = data.substring(8);
+        } else if (data.startsWith('NEXT:')) {
+          _nextProcess = data.substring(5);
+        } else if (data.startsWith('CYCLE:')) {
+          _nextCycle = data.substring(6);
+        }
+        // You can also parse POWER status, etc.
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _dataSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _connectToHC05() async {
+    // You can either scan and show a list or hardcode a MAC for testing.
+    // For simplicity, let's assume you have a MAC address stored.
+    // Replace with your actual HC-05 MAC address.
+    final String macAddress = "98:D3:31:XX:XX:XX"; 
+    try {
+      await BluetoothService.connectToDevice(macAddress);
+      setState(() => _isConnected = true);
+      // Optionally request initial data:
+      BluetoothService.sendData('GET_STATUS');
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Connection failed: $e')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -67,7 +119,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     children: [
                       _DeviceHeader(),
                       const SizedBox(height: 34),
-                      _StatusGrid(isPoweredOn: isPoweredOn),
+                      _StatusGrid(
+                        isPoweredOn: isPoweredOn,
+                        temperature: _temperature,
+                        currentProcess: _currentProcess,
+                        nextProcess: _nextProcess,
+                        nextCycle: _nextCycle,
+                      ),
                       const SizedBox(height: 210),
                     ],
                   ),
