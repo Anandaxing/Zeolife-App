@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'control_screen.dart';
 
 class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
@@ -35,10 +36,7 @@ class SplashScreen extends StatelessWidget {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () {
-                    // Placeholder action – replace with navigation or logic
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Continue tapped')),
-                    );
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const ControlPage()));
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: lime, // lime button
