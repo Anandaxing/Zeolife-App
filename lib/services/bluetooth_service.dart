@@ -1,9 +1,9 @@
-// lib/bluetooth_service.dart
-import 'package:flutter_classic_bluetooth/flutter_classic_bluetooth.dart';
 import 'dart:async';
+import 'dart:typed_data';
+import 'package:flutter_classic_bluetooth/flutter_classic_bluetooth.dart';
 
 class BluetoothService {
-  static BluetoothConnection? _connection;
+  static BtcConnection? _connection;
   static final StreamController<String> _dataController =
       StreamController<String>.broadcast();
 
@@ -12,8 +12,9 @@ class BluetoothService {
 
   static Future<void> connectToDevice(String address) async {
     try {
-      _connection = await BluetoothConnection.toAddress(address);
-      _connection!.input.listen(
+      final bluetooth = FlutterClassicBluetooth();
+      _connection = await bluetooth.connect(address: address);
+      _connection?.input.listen(
         (bytes) {
           String received = String.fromCharCodes(bytes);
           _dataController.add(received);
@@ -26,7 +27,9 @@ class BluetoothService {
     }
   }
 
-  static void sendData(String data) => _connection?.output.add(data.codeUnits);
+  static void sendData(String data) {
+    _connection?.output.add(Uint8List.fromList(data.codeUnits));
+  }
 
   static void disconnect() {
     _connection?.close();

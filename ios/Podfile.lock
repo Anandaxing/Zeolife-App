@@ -1,0 +1,22 @@
+PODS:
+  - Flutter (1.0.0)
+  - flutter_classic_bluetooth (0.1.0):
+    - Flutter
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - flutter_classic_bluetooth (from `.symlinks/plugins/flutter_classic_bluetooth/ios`)
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  flutter_classic_bluetooth:
+    :path: ".symlinks/plugins/flutter_classic_bluetooth/ios"
+
+SPEC CHECKSUMS:
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  flutter_classic_bluetooth: 5511c556e4fc157e5ba0901a631eb1381f17c3ff
+
+PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+
+COCOAPODS: 1.12.1
