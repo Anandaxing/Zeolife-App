@@ -67,8 +67,9 @@ class ZeoMachineController implements MachineController {
 
   @override
   void toggleMainPower() {
-    _updateState(_state.copyWith(isPowerOn: !_state.isPowerOn));
-    BluetoothService.sendData(_state.isPowerOn ? 'POWER_ON' : 'POWER_OFF');
+    final nextState = !_state.isPowerOn;
+    _updateState(_state.copyWith(isPowerOn: nextState));
+    BluetoothService.sendPowerCommand(nextState);
   }
 
   @override

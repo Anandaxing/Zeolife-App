@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_classic_bluetooth: ^1.0.1
+  permission_handler: ^13.0.2
 
 dev_dependencies:
   flutter_test:
