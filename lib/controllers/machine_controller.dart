@@ -6,8 +6,8 @@ abstract class MachineController {
   Stream<ZeoMachineState> get stateStream;
   ZeoMachineState get currentState;
 
-  void toggleMainPower();
-  Future<void> connectToDevice(String macAddress);
+  Future<void> toggleMainPower();
+  Future<void> connectToDevice([String? macAddress]);
   void dispose();
 }
 
@@ -66,17 +66,22 @@ class ZeoMachineController implements MachineController {
   }
 
   @override
-  void toggleMainPower() {
+  Future<void> toggleMainPower() async {
     final nextState = !_state.isPowerOn;
     _updateState(_state.copyWith(isPowerOn: nextState));
-    BluetoothService.sendPowerCommand(nextState);
+    await BluetoothService.sendPowerCommand(nextState);
   }
 
   @override
-  Future<void> connectToDevice(String macAddress) async {
-    await BluetoothService.connectToDevice(macAddress);
-    _updateState(_state.copyWith(isConnected: true));
-    BluetoothService.sendData('GET_STATUS');
+  Future<void> connectToDevice([String? macAddress]) async {
+    try {
+      await BluetoothService.connectToDevice(macAddress);
+      _updateState(_state.copyWith(isConnected: true));
+      await BluetoothService.sendData('GET_STATUS');
+    } catch (_) {
+      _updateState(_state.copyWith(isConnected: false));
+      rethrow;
+    }
   }
 
   @override

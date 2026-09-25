@@ -65,7 +65,7 @@ class ZeoMachineState {
 
   const ZeoMachineState({
     this.isConnected = false,
-    this.isPowerOn = true,
+    this.isPowerOn = false,
     this.currentProcess = 'HEATING',
     this.nextProcess = 'COOLING',
     this.nextCycleIn = '01:10:32',

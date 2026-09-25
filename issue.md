@@ -1,268 +1,109 @@
-# Zeolife App — ON/OFF Power Button: How It Works
+# HC-05 Bluetooth Connection Troubleshooting Guide
 
-> **Audience:** Junior software engineer  
-> **Scope:** Only the ON/OFF power toggle — how tapping the button sends `"1"` (active) or `"0"` (inactive) to the Arduino HC-05 module  
-> **Default state:** Button starts **inactive** (OFF)
-
----
-
-## Architecture Overview
-
-The power button flow touches **4 files** in this exact order:
-
-```
-User taps button
-    ↓
-FloatingPowerController  (view/widget — UI)
-    ↓
-ZeoMachineController     (controller — business logic)
-    ↓
-BluetoothService         (service — hardware communication)
-    ↓
-HC-05 module receives ASCII "1" or "0"
-```
+> **Audience:** Mobile App Developers & Embedded Systems Engineers  
+> **Scope:** Detailed analysis and resolution of Android Bluetooth Classic (RFCOMM/SPP) connection failures, specifically targeting the HC-05/HC-06 modules using Flutter.
 
 ---
 
-## Step-by-Step Data Flow
+## 1. Problem Analysis: The Two Notorious Exceptions
 
-### Step 1 — The Button (UI Layer)
+When attempting to connect an Android app to a legacy Bluetooth 2.0/3.0 module (like the HC-05) via the Serial Port Profile (SPP), developers frequently encounter two specific, frustrating low-level Android exceptions. 
 
-**File:** `lib/views/widgets/floating_power_controller.dart`
+Both of these errors are bubbling up from the native Android Bluetooth stack (`android.bluetooth.BluetoothSocket`) through the Flutter plugin.
 
-This widget renders the circular power button at the bottom of the screen. It receives two things from its parent:
+### Error 1: "socket might closed or timeout, read ret: -1"
+**The Error Message:**
+```text
+Failed to connect: BtcConnectionException(BtcConnectFailure,unknown): 
+Connection failed: read failed, socket might closed or timeout, read ret: -1 [MAC_ADDRESS]
+```
+**Root Causes:**
+- **Secure Handshake Refusal:** Modern Android versions strongly prefer secure RFCOMM sockets (`createRfcommSocketToServiceRecord`). However, HC-05 modules often have incomplete or non-standard Bluetooth 2.0 implementations. When Android attempts the secure pairing handshake over the socket, the HC-05 drops it immediately.
+- **Hardware Power/Brownouts:** When the HC-05 radio turns on to establish the connection, it draws peak current. If it is powered directly from a weak 3.3V pin or a struggling 5V rail, it resets, dropping the connection instantly.
+- **Logic Level Mismatch:** The HC-05 RX pin is 3.3V logic. If a 5V Arduino TX is connected directly without a voltage divider, it can cause unpredictable module resets.
 
-- `isPoweredOn` — current state (controls the button color)
-- `onPressed` — callback to execute when tapped
+### Error 2: "Null file descriptor returned"
+**The Error Message:**
+```text
+Failed to connect: BtcConnectionException(BtcConnectFailure,unknown): 
+Connection failed: Null file descriptor returned [MAC_ADDRESS]
+```
+**Root Causes:**
+- **Corrupted Android Bluetooth Stack:** This is the most common cause. When a previous socket connection fails abruptly (like the `-1` error above), the Android OS Bluetooth service (specifically the Service Discovery Protocol - SDP cache) can get stuck in a "zombie" state. When you ask the OS for a new socket, the OS fails to allocate internal file descriptors and throws this exception.
+- **Race Conditions:** Attempting to open a new socket while a previous socket is still being torn down by the OS.
+- **Incompatible Security Flags:** Attempting an insecure connection (`createInsecureRfcommSocketToServiceRecord`) on a device that the OS insists requires a secure connection, or vice versa.
+- **Stale Native Code:** If the Flutter app is running an older version of a Bluetooth plugin that doesn't handle socket allocation failures gracefully, this error will surface persistently.
 
+---
+
+## 2. The Comprehensive Solution Approach
+
+To achieve a stable connection to an HC-05 module, we must implement a multi-layered approach that addresses both the software (Flutter/Android) and hardware levels.
+
+### A. The Software Strategy (Flutter Code)
+
+1. **Upgrade Native Dependencies:** 
+   Ensure you are using the latest version of your Bluetooth plugin (e.g., `flutter_classic_bluetooth: ^1.5.0`). The native Java/Kotlin code in newer versions handles socket creation fallbacks much better. **CRITICAL:** You must completely stop (`q`) and restart `flutter run` for native dependency upgrades to take effect. Hot Reload/Restart will not work.
+
+2. **Implement Alternating Security Retries:**
+   Do not rely on a single connection attempt. Implement a retry loop that alternates between `secure: false` and `secure: true`. Most HC-05 clones require an insecure connection, but some Android phones require a secure attempt first.
+
+3. **Enforce Delays for OS Socket Cleanup:**
+   If a connection fails, you **must** wait before trying again. The Android OS takes time to clean up the native file descriptors. Without a delay (e.g., 800ms - 1000ms), consecutive retries will instantly hit the "Null file descriptor returned" error.
+
+4. **Explicit Socket Destruction:**
+   Always explicitly call `.close()` on any failed connection object before attempting a new connection to free up the file descriptors.
+
+**Implementation Example:**
 ```dart
-InkWell(
-  customBorder: const CircleBorder(),
-  onTap: onPressed,  // ← this fires when the user taps the button
-  child: Container(
-    decoration: BoxDecoration(
-      // coral (red) when ON, gray when OFF
-      color: isPoweredOn ? AppColors.coral : AppColors.inactivePower,
-      shape: BoxShape.circle,
-    ),
-    child: const Icon(Icons.power_settings_new_rounded, ...),
-  ),
-)
-```
+static Future<void> connectToDevice(String targetAddress) async {
+  // Ensure previous zombie sockets are closed
+  await _cleanupConnection();
+  
+  Object? lastError;
+  const int maxRetries = 3;
 
-**What it does:** Nothing smart — it just calls `onPressed` and displays a color based on `isPoweredOn`. All logic lives elsewhere.
-
----
-
-### Step 2 — The Parent Screen Wires the Callback
-
-**File:** `lib/views/control_screen.dart`
-
-The `DashboardScreen` creates the `FloatingPowerController` and connects it to the `MachineController`:
-
-```dart
-FloatingPowerController(
-  isPoweredOn: state.isPowerOn,
-  onPressed: () => _controller.toggleMainPower(),  // ← calls the controller
-)
-```
-
-The `state` object comes from a `StreamBuilder` that listens to `_controller.stateStream`. Every time the controller updates the state, this widget rebuilds and the button color changes automatically.
-
----
-
-### Step 3 — The Controller (Business Logic Layer)
-
-**File:** `lib/controllers/machine_controller.dart`
-
-When `toggleMainPower()` is called:
-
-```dart
-void toggleMainPower() {
-  final nextState = !_state.isPowerOn;                    // flip: OFF→ON or ON→OFF
-  _updateState(_state.copyWith(isPowerOn: nextState));    // update local state (triggers UI rebuild)
-  BluetoothService.sendPowerCommand(nextState);           // send to Arduino
-}
-```
-
-**What happens here:**
-1. **Flip the boolean** — if it was `false` (OFF), it becomes `true` (ON), and vice versa.
-2. **Update the state** — `_updateState()` pushes the new `ZeoMachineState` into the `StreamController`, which the `StreamBuilder` in the UI is listening to. This is what makes the button change color instantly.
-3. **Send the command** — calls `BluetoothService.sendPowerCommand(nextState)` to actually transmit to the HC-05.
-
----
-
-### Step 4 — The Bluetooth Service (Hardware Layer)
-
-**File:** `lib/services/bluetooth_service.dart`
-
-```dart
-static void sendPowerCommand(bool isOn) {
-  if (!isConnected) {
-    return;                            // guard: do nothing if not connected
-  }
-  _connection?.output.add(powerCommandBytes(isOn));
-}
-```
-
-The bytes are built by:
-
-```dart
-static String commandForPower(bool isOn) => isOn ? '1' : '0';
-
-static Uint8List powerCommandBytes(bool isOn) =>
-    Uint8List.fromList(commandForPower(isOn).codeUnits);
-```
-
-**What this does:**
-- `isOn = true` → string `'1'` → ASCII code units `[49]` → sent as 1 byte over Bluetooth
-- `isOn = false` → string `'0'` → ASCII code units `[48]` → sent as 1 byte over Bluetooth
-
-The Arduino's `Serial.read()` receives the ASCII character `'1'` or `'0'` and acts on it.
-
----
-
-### Step 5 — Arduino Side (For Reference Only)
-
-The Arduino sketch reads the incoming byte and controls an output pin:
-
-```cpp
-void loop() {
-  if (Serial.available()) {
-    char c = Serial.read();
-    if (c == '1') {
-      digitalWrite(LED_BUILTIN, HIGH);   // ON
-    } else if (c == '0') {
-      digitalWrite(LED_BUILTIN, LOW);    // OFF
+  for (int attempt = 1; attempt <= maxRetries; attempt++) {
+    // Alternate secure flag to handle quirky HC-05 clones
+    final secure = attempt.isEven; 
+    
+    try {
+      _connection = await _bluetooth.connect(
+        address: targetAddress,
+        secure: secure,
+        timeout: const Duration(seconds: 15), 
+      );
+      return; // Success!
+    } catch (e) {
+      lastError = e;
+      await _cleanupConnection();
+      
+      // CRITICAL: Give the Android OS time to free the null file descriptor
+      if (attempt < maxRetries) {
+        await Future<void>.delayed(const Duration(milliseconds: 1000));
+      }
     }
   }
+  throw lastError!;
 }
 ```
 
-> ⚠️ **Do not modify the Arduino sketch** without the firmware owner's approval. This is shown only so you understand what happens on the receiving end.
+### B. The Operating System Strategy (Phone Settings)
 
----
+If the app continuously throws "Null file descriptor returned" despite having the correct code, the Android Bluetooth stack itself has crashed internally. 
 
-## How the Connection is Established
+**How to clear the OS state:**
+1. **Toggle Bluetooth:** Turn the phone's Bluetooth OFF, wait 5 seconds, and turn it back ON.
+2. **Clear Pairings:** Go to Android Bluetooth Settings, "Forget" or "Unpair" the HC-05 module, and pair it again (PIN: `1234` or `0000`).
+3. **Reboot:** If the OS stack is completely locked up, a phone reboot is required.
 
-Before the power button can send anything, the app must connect to the HC-05. This happens in the controller:
+### C. The Hardware Strategy (Arduino & HC-05)
 
-**File:** `lib/controllers/machine_controller.dart`
+Software cannot fix a hardware issue. If the module is dropping the connection instantly, verify the following:
 
-```dart
-Future<void> connectToDevice(String macAddress) async {
-  await BluetoothService.connectToDevice(macAddress);     // opens Bluetooth serial link
-  _updateState(_state.copyWith(isConnected: true));        // mark as connected
-  BluetoothService.sendData('GET_STATUS');                 // request initial status
-}
-```
-
-Which calls into `BluetoothService.connectToDevice()`:
-
-**File:** `lib/services/bluetooth_service.dart`
-
-```dart
-static Future<void> connectToDevice(String address) async {
-  await requestPermissions();                              // Bluetooth + Location permissions
-  final bluetooth = FlutterClassicBluetooth();
-  _connection = await bluetooth.connect(address: address); // open SPP serial connection
-  _connection?.input.listen(                               // listen for data FROM Arduino
-    (bytes) {
-      final received = String.fromCharCodes(bytes);
-      _dataController.add(received);
-    },
-    onDone: () => _connection = null,
-  );
-}
-```
-
-**Key points:**
-- The phone must already be **manually paired** with the HC-05 in Android Bluetooth settings (PIN is usually `1234`).
-- The MAC address is currently a placeholder — replace `"00:00:00:00:00:00"` with the real HC-05 MAC when testing.
-- Baud rate (38400) is configured on the HC-05 module and the Arduino sketch — the Flutter/Android Bluetooth SPP layer handles this transparently.
-
----
-
-## Default State
-
-**File:** `lib/models/zeo_machine_state.dart`
-
-The `ZeoMachineState` model defines the initial state. Currently:
-
-```dart
-const ZeoMachineState({
-  this.isConnected = false,
-  this.isPowerOn = true,       // ⚠️ currently defaults to ON
-  ...
-});
-```
-
-> **Per requirements, the default should be `false` (inactive/OFF).** This needs to be changed so the button starts in the OFF state. See the fix below.
-
-### Fix: Change Default Power State to OFF
-
-In `lib/models/zeo_machine_state.dart`, line 68:
-
-```diff
-- this.isPowerOn = true,
-+ this.isPowerOn = false,
-```
-
-This ensures:
-- The button renders in the **inactive (gray)** color on app start
-- The first tap sends `"1"` (ON) to the Arduino
-- The second tap sends `"0"` (OFF) back
-
----
-
-## Required Permissions (Already Configured)
-
-**File:** `android/app/src/main/AndroidManifest.xml`
-
-These are already in place:
-
-```xml
-<uses-permission android:name="android.permission.BLUETOOTH" />
-<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-```
-
-Runtime permission requests are handled in `BluetoothService.requestPermissions()` using the `permission_handler` package.
-
----
-
-## Dependencies (Already Configured)
-
-**File:** `pubspec.yaml`
-
-```yaml
-dependencies:
-  flutter_classic_bluetooth: ^1.0.1   # Bluetooth Classic SPP — works with HC-05
-  permission_handler: ^13.0.2         # Runtime permission requests
-```
-
----
-
-## Summary: What Happens When the User Taps the Power Button
-
-| Step | File | What Happens |
-|------|------|-------------|
-| 1 | `floating_power_controller.dart` | `onTap` fires the `onPressed` callback |
-| 2 | `control_screen.dart` | Callback calls `_controller.toggleMainPower()` |
-| 3 | `machine_controller.dart` | Flips `isPowerOn`, updates state stream, calls `BluetoothService.sendPowerCommand()` |
-| 4 | `bluetooth_service.dart` | Converts `true`→`"1"` or `false`→`"0"`, sends ASCII byte(s) over Bluetooth SPP |
-| 5 | Arduino (HC-05) | `Serial.read()` receives `'1'` or `'0'`, sets output pin HIGH or LOW |
-
----
-
-## Testing Checklist
-
-- [ ] Changed `isPowerOn` default to `false` in `zeo_machine_state.dart`
-- [ ] Phone paired with HC-05 manually in Android Bluetooth settings (PIN: `1234`)
-- [ ] Replaced placeholder MAC address with real HC-05 MAC
-- [ ] App starts with button in **inactive (gray)** state
-- [ ] First tap sends `"1"` → Arduino output goes HIGH
-- [ ] Second tap sends `"0"` → Arduino output goes LOW
-- [ ] Disconnecting/leaving the screen calls `dispose()` properly
+1. **Voltage Logic Level (Crucial):**
+   The Arduino TX pin operates at 5V, but the HC-05 RX pin operates at 3.3V. You **MUST** use a voltage divider (e.g., 1kΩ and 2kΩ resistors) between Arduino TX and HC-05 RX. Sending 5V directly to the RX pin will eventually damage the module and cause erratic connection drops.
+2. **Dedicated Power:**
+   Do not power the HC-05 from the Arduino's 3.3V pin. The 3.3V regulator on most Arduinos cannot supply the ~50mA peak current required when the Bluetooth radio negotiates a connection. Power the HC-05 from the 5V pin (the HC-05 breakout board has its own internal 3.3V regulator).
+3. **Make the baudrate 38400 in every variables:**
+   Ensure the baud rate is explicitly set to `38400` in all locations (e.g., `BluetoothService.baudRate = 38400` in Flutter, and `Serial.begin(38400)` / `btSerial.begin(38400)` in the Arduino sketch). A mismatch won't prevent connection, but will result in garbled data being received.

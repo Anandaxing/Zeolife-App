@@ -1,9 +1,3 @@
-# zeolife_app
-
-A new Flutter project.
-
-## Arduino code 
-```cpp
 /*
   ============================================================================
   ZEOLIFE MACHINE CONTROLLER
@@ -226,4 +220,3 @@ void shutdownAllOutputs() {
   setM3(false);
   setM4(false);
 }
-```

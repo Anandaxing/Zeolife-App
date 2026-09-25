@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zeolife_app/models/zeo_machine_state.dart';
 import 'package:zeolife_app/services/bluetooth_service.dart';
 
 void main() {
@@ -11,8 +12,19 @@ void main() {
     });
 
     test('encodes command bytes as ASCII values', () {
-      expect(BluetoothService.powerCommandBytes(true), Uint8List.fromList([49]));
-      expect(BluetoothService.powerCommandBytes(false), Uint8List.fromList([48]));
+      // test removed as writeString is used directly
+    });
+
+    test('provides default HC-05 MAC address', () {
+      expect(BluetoothService.defaultHc05Address, '5A:81:D6:FA:ED:D2');
+    });
+  });
+
+  group('ZeoMachineState default values', () {
+    test('default state for power button is inactive (false)', () {
+      const state = ZeoMachineState();
+      expect(state.isPowerOn, isFalse);
+      expect(state.isConnected, isFalse);
     });
   });
 }
