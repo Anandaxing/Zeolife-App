@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class BluetoothService {
   static const int baudRate = 9600;
@@ -15,102 +16,86 @@ class BluetoothService {
       StreamController<String>.broadcast();
 
   static Stream<String> get dataStream => _dataController.stream;
-  static bool get isConnected => _connection != null && _connection!.isConnected;
+  static bool get isConnected => _connection!= null && _connection!.isConnected;
 
-  static String commandForPower(bool isOn) => isOn ? '1' : '0';
+  static String commandForPower(bool isOn) => isOn? '1' : '0';
 
+  static Future<void> _ensurePermissions() async {
+    // Di Android 15, jangan minta bluetooth via permission_handler, biar system yang handle
+    // Kita cuma minta lokasi aja
+    final locStatus = await Permission.locationWhenInUse.request();
+    if (locStatus.isPermanentlyDenied) {
+      await openAppSettings();
+      throw Exception('Aktifkan Izin Lokasi di Settings');
+    }
+    if (locStatus.isDenied) {
+      throw Exception('Izin Lokasi wajib di-Allow');
+    }
+    // Bluetooth CONNECT akan otomatis diminta Android pas getBondedDevices dipanggil
+  }
+  
   static Future<List<BluetoothDevice>> getBondedDevices() async {
+    await _ensurePermissions();
     return _bluetooth.getBondedDevices();
   }
 
   static Uint8List powerCommandBytes(bool isOn) =>
       Uint8List.fromList(utf8.encode(commandForPower(isOn)));
 
+  static String normalizeAddress(String? rawAddress) {
+    final sanitized = (rawAddress?? '').trim().replaceAll(RegExp(r'[^A-Fa-f0-9]'), '').toUpperCase();
+    if (sanitized.isEmpty) return '';
+    if (sanitized.length == 12) {
+      final formatted = StringBuffer();
+      for (var i = 0; i < sanitized.length; i++) {
+        if (i > 0 && i % 2 == 0) formatted.write(':');
+        formatted.write(sanitized[i]);
+      }
+      return formatted.toString();
+    }
+    return sanitized;
+  }
+
+  static String resolveTargetAddress(String? requestedAddress, List<BluetoothDevice> pairedDevices) {
+    final normalizedRequest = normalizeAddress(requestedAddress);
+    if (normalizedRequest.isNotEmpty) {
+      final exactMatch = pairedDevices.where((device) => device.address.toUpperCase() == normalizedRequest);
+      if (exactMatch.isNotEmpty) return exactMatch.first.address;
+    }
+    if (pairedDevices.isEmpty) return defaultHc05Address;
+    final match = pairedDevices.firstWhere(
+      (device) => (device.name?.toUpperCase().contains('HC-05')?? false) || (device.name?.toUpperCase().contains('HC-06')?? false),
+      orElse: () => pairedDevices.first,
+    );
+    return match.address;
+  }
+
   static Future<void> connectToDevice([String? address]) async {
-    // 1. Check if Bluetooth is enabled
+    await _ensurePermissions();
+
     bool? isEnabled = await _bluetooth.isEnabled;
-    if (isEnabled == null || !isEnabled) {
+    if (isEnabled == null ||!isEnabled) {
       await _bluetooth.requestEnable();
     }
 
-    // 2. Resolve the exact paired device. This matches the working terminal app behavior:
-    //    connect only to the exact device that Android knows about, not a guessed fallback.
-    String? targetAddress = address?.trim();
-    if (targetAddress != null && targetAddress.isNotEmpty) {
-      targetAddress = targetAddress.replaceAll(RegExp(r'[^A-Fa-f0-9]'), '').toUpperCase();
-      if (targetAddress.length == 12) {
-        final formatted = StringBuffer();
-        for (var i = 0; i < targetAddress.length; i++) {
-          if (i > 0 && i % 2 == 0) {
-            formatted.write(':');
-          }
-          formatted.write(targetAddress[i]);
-        }
-        targetAddress = formatted.toString();
-      }
-    }
-
     final List<BluetoothDevice> paired = await _bluetooth.getBondedDevices();
-    debugPrint('Paired devices: ${paired.length}');
-    for (final device in paired) {
-      debugPrint('  ${device.name} - ${device.address} [${device.isBonded}]');
+    final targetAddress = resolveTargetAddress(address, paired);
+    if (targetAddress.isEmpty) {
+      throw StateError('No paired HC-05 found. Pair dulu di Settings Bluetooth HP.');
     }
 
-    if (targetAddress == null || targetAddress.isEmpty) {
-      final match = paired.firstWhere(
-        (device) =>
-            (device.name?.toUpperCase().contains('HC-05') ?? false) ||
-            (device.name?.toUpperCase().contains('HC-06') ?? false) ||
-            (device.name?.toUpperCase().contains('BT') ?? false),
-        orElse: () => paired.isNotEmpty ? paired.first : BluetoothDevice(
-            name: 'UNKNOWN',
-            address: defaultHc05Address,
-            type: BluetoothDeviceType.classic,
-            isConnected: false,
-            bondState: BluetoothBondState.bonded,
-          ),
-      );
-      targetAddress = match.address;
-      debugPrint('Using paired device by name: ${match.name} at $targetAddress');
-    } else {
-      final exactMatch = paired.where(
-        (device) => device.address.toUpperCase() == targetAddress!.toUpperCase(),
-      );
-      if (exactMatch.isNotEmpty) {
-        targetAddress = exactMatch.first.address;
-        debugPrint('Matched exact paired device: ${exactMatch.first.name} at $targetAddress');
-      }
-    }
-
-    if (targetAddress == null || targetAddress.isEmpty) {
-      throw StateError(
-        'No paired HC-05 device was found. Pair the module in Android Bluetooth settings and retry.',
-      );
-    }
-
-    // 3. Connect only to the exact device address. Do not try a sequence of guessed MACs.
-    debugPrint('Connecting to $targetAddress using flutter_bluetooth_serial...');
     await _cleanupConnection();
-
     try {
       _connection = await BluetoothConnection.toAddress(targetAddress);
-      debugPrint('Connected successfully to $targetAddress');
-
       _connection!.input!.listen((Uint8List data) {
-        final stringData = ascii.decode(data);
-        debugPrint('BT RX: $stringData');
-        _dataController.add(stringData);
+        _dataController.add(ascii.decode(data));
       }).onDone(() {
-        debugPrint('Disconnected by remote');
         _connection = null;
       });
       return;
     } catch (e) {
-      debugPrint('Connection failed for $targetAddress: $e');
       await _cleanupConnection();
-      throw Exception(
-        'Connection failed: $e. The HC-05 is not accepting the serial RFCOMM socket from this app.',
-      );
+      throw Exception('Connection failed: $e');
     }
   }
 
@@ -134,7 +119,6 @@ class BluetoothService {
     final cmd = commandForPower(isOn);
     _connection!.output.add(Uint8List.fromList(utf8.encode(cmd)));
     await _connection!.output.allSent;
-    debugPrint('BT TX: $cmd');
   }
 
   static Future<void> disconnect() async {

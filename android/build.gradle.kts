@@ -16,20 +16,16 @@ subprojects {
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
 
-// Workaround for older Flutter plugins (like flutter_bluetooth_serial) that don't specify a namespace,
-// which is required by Android Gradle Plugin (AGP) 8.0+.
+// Keep the build configuration explicit and compatible with AGP 8 without registering
+// an afterEvaluate callback after Gradle has already finished evaluating the project.
 subprojects {
-    afterEvaluate {
-        val android = project.extensions.findByName("android")
-        if (android != null) {
-            try {
-                val namespaceStr = android.javaClass.getMethod("getNamespace").invoke(android)
-                if (namespaceStr == null) {
-                    android.javaClass.getMethod("setNamespace", String::class.java).invoke(android, project.group.toString())
-                }
-            } catch (e: Exception) {
-                // Ignore reflection errors if the plugin doesn't support namespace
+    if (project.plugins.hasPlugin("com.android.library")) {
+        project.extensions.configure<com.android.build.gradle.LibraryExtension>("android") {
+            if (namespace.isNullOrBlank()) {
+                namespace = "com.example.${project.name.replace(Regex("[^A-Za-z0-9_]"), "_")}"
             }
+            compileSdk = 35
+            defaultConfig.targetSdk = 35
         }
     }
 }

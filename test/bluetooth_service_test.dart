@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zeolife_app/models/zeo_machine_state.dart';
 import 'package:zeolife_app/services/bluetooth_service.dart';
@@ -11,8 +12,20 @@ void main() {
       expect(BluetoothService.commandForPower(false), '0');
     });
 
-    test('encodes command bytes as ASCII values', () {
-      // test removed as writeString is used directly
+    test('normalizes a bare MAC address into the expected colon-separated format', () {
+      expect(
+        BluetoothService.normalizeAddress('5A81D6FAEDD2'),
+        '5A:81:D6:FA:ED:D2',
+      );
+    });
+
+    test('uses the default HC-05 address when no paired device is available', () {
+      final resolved = BluetoothService.resolveTargetAddress(
+        null,
+        const <BluetoothDevice>[],
+      );
+
+      expect(resolved, BluetoothService.defaultHc05Address);
     });
 
     test('provides default HC-05 MAC address', () {
