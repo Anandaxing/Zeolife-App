@@ -1,6 +1,6 @@
 import 'dart:async';
 import '../models/zeo_machine_state.dart';
-import '../services/bluetooth_service.dart';
+import 'bluetooth_controller.dart';
 
 abstract class MachineController {
   Stream<ZeoMachineState> get stateStream;
@@ -14,10 +14,11 @@ abstract class MachineController {
 class ZeoMachineController implements MachineController {
   ZeoMachineState _state = const ZeoMachineState();
   final StreamController<ZeoMachineState> _stateController = StreamController<ZeoMachineState>.broadcast();
+  final BluetoothController _bluetoothController = BluetoothController();
   StreamSubscription<String>? _bluetoothSubscription;
 
   ZeoMachineController() {
-    _bluetoothSubscription = BluetoothService.dataStream.listen(_onTelemetryReceived);
+    _bluetoothSubscription = _bluetoothController.dataStream.listen(_onTelemetryReceived);
   }
 
   @override
@@ -69,15 +70,15 @@ class ZeoMachineController implements MachineController {
   Future<void> toggleMainPower() async {
     final nextState = !_state.isPowerOn;
     _updateState(_state.copyWith(isPowerOn: nextState));
-    await BluetoothService.sendPowerCommand(nextState);
+    await _bluetoothController.sendPowerCommand(nextState);
   }
 
   @override
   Future<void> connectToDevice([String? macAddress]) async {
     try {
-      await BluetoothService.connectToDevice(macAddress);
+      await _bluetoothController.connectToDevice(macAddress);
       _updateState(_state.copyWith(isConnected: true));
-      await BluetoothService.sendData('GET_STATUS');
+      await _bluetoothController.sendData('GET_STATUS');
     } catch (_) {
       _updateState(_state.copyWith(isConnected: false));
       rethrow;
@@ -87,6 +88,7 @@ class ZeoMachineController implements MachineController {
   @override
   void dispose() {
     _bluetoothSubscription?.cancel();
+    _bluetoothController.dispose();
     _stateController.close();
   }
 }
