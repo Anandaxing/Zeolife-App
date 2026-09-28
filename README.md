@@ -77,8 +77,11 @@ float currentTempC = NAN;
 
 // ---------------------------------------------------------------------------
 void setup() {
-  Serial.begin(9600);
-  btSerial.begin(9600);
+  Serial.begin(38400);
+  btSerial.begin(38400);
+
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
 
   pinMode(SSR_HEATER_PIN, OUTPUT);
   pinMode(SSR_M4_PIN, OUTPUT);
@@ -117,10 +120,12 @@ void handleBluetoothCommands() {
 
     if (cmd == '1') {
       systemOn = true;
+      digitalWrite(LED_BUILTIN, HIGH); // Lights up Arduino built-in LED
       btSerial.println(F("STATUS:ON"));
       Serial.println(F("System turned ON via Bluetooth"));
     } else if (cmd == '0') {
       systemOn = false;
+      digitalWrite(LED_BUILTIN, LOW);  // Turns off Arduino built-in LED
       shutdownAllOutputs();
       btSerial.println(F("STATUS:OFF"));
       Serial.println(F("System turned OFF via Bluetooth"));

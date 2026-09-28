@@ -1,23 +1,24 @@
 import 'dart:async';
 import '../models/zeo_machine_state.dart';
-import '../services/bluetooth_service.dart';
+import 'bluetooth_controller.dart';
 
 abstract class MachineController {
   Stream<ZeoMachineState> get stateStream;
   ZeoMachineState get currentState;
 
-  void toggleMainPower();
-  Future<void> connectToDevice(String macAddress);
+  Future<void> toggleMainPower();
+  Future<void> connectToDevice([String? macAddress]);
   void dispose();
 }
 
 class ZeoMachineController implements MachineController {
   ZeoMachineState _state = const ZeoMachineState();
   final StreamController<ZeoMachineState> _stateController = StreamController<ZeoMachineState>.broadcast();
+  final BluetoothController _bluetoothController = BluetoothController();
   StreamSubscription<String>? _bluetoothSubscription;
 
   ZeoMachineController() {
-    _bluetoothSubscription = BluetoothService.dataStream.listen(_onTelemetryReceived);
+    _bluetoothSubscription = _bluetoothController.dataStream.listen(_onTelemetryReceived);
   }
 
   @override
@@ -66,21 +67,28 @@ class ZeoMachineController implements MachineController {
   }
 
   @override
-  void toggleMainPower() {
-    _updateState(_state.copyWith(isPowerOn: !_state.isPowerOn));
-    BluetoothService.sendData(_state.isPowerOn ? 'POWER_ON' : 'POWER_OFF');
+  Future<void> toggleMainPower() async {
+    final nextState = !_state.isPowerOn;
+    _updateState(_state.copyWith(isPowerOn: nextState));
+    await _bluetoothController.sendPowerCommand(nextState);
   }
 
   @override
-  Future<void> connectToDevice(String macAddress) async {
-    await BluetoothService.connectToDevice(macAddress);
-    _updateState(_state.copyWith(isConnected: true));
-    BluetoothService.sendData('GET_STATUS');
+  Future<void> connectToDevice([String? macAddress]) async {
+    try {
+      await _bluetoothController.connectToDevice(macAddress);
+      _updateState(_state.copyWith(isConnected: true));
+      await _bluetoothController.sendData('GET_STATUS');
+    } catch (_) {
+      _updateState(_state.copyWith(isConnected: false));
+      rethrow;
+    }
   }
 
   @override
   void dispose() {
     _bluetoothSubscription?.cancel();
+    _bluetoothController.dispose();
     _stateController.close();
   }
 }

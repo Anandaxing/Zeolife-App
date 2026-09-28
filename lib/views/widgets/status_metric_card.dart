@@ -38,9 +38,13 @@ class StatusMetricCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(
-                  label,
-                  style: const TextStyle(fontSize: 12, color: AppColors.textGray, fontWeight: FontWeight.w400),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    label,
+                    style: const TextStyle(fontSize: 12, color: AppColors.textGray, fontWeight: FontWeight.w400),
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Row(

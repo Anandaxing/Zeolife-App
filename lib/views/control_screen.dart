@@ -77,7 +77,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          ConnectionHeaderCard(isConnected: state.isConnected),
+                          ConnectionHeaderCard(
+                            isConnected: state.isConnected,
+                            onTap: () async {
+                              if (state.isConnected) return;
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Connecting to HC-05...'),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+                              }
+                              try {
+                                await _controller.connectToDevice();
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Connected to HC-05!'),
+                                      backgroundColor: Colors.green,
+                                      duration: Duration(seconds: 2),
+                                    ),
+                                  );
+                                }
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Failed to connect: $e'),
+                                      backgroundColor: Colors.red,
+                                      duration: const Duration(seconds: 4),
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                          ),
                           const SizedBox(height: 16),
                           // Core Metrics Grid
                           GridView.count(
@@ -85,7 +120,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             crossAxisCount: 2,
                             crossAxisSpacing: 16,
                             mainAxisSpacing: 16,
-                            childAspectRatio: 2.45,
+                            childAspectRatio: 2.1,
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             children: [
@@ -158,7 +193,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     bottom: 0,
                     child: FloatingPowerController(
                       isPoweredOn: state.isPowerOn,
-                      onPressed: () => _controller.toggleMainPower(),
+                      onPressed: () {
+                        if (!state.isConnected) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Not connected! Tap the HC-05 card at the top to connect first.'),
+                              backgroundColor: Colors.orange,
+                              duration: Duration(seconds: 3),
+                            ),
+                          );
+                          return;
+                        }
+                        _controller.toggleMainPower();
+                      },
                     ),
                   ),
                 ],

@@ -3,25 +3,32 @@ import '../../constants/app_colors.dart';
 
 class ConnectionHeaderCard extends StatelessWidget {
   final bool isConnected;
+  final VoidCallback? onTap;
 
   const ConnectionHeaderCard({
     super.key,
     required this.isConnected,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 80,
-      padding: const EdgeInsets.symmetric(horizontal: 26),
-      decoration: BoxDecoration(
-        color: AppColors.white,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: AppColors.headerBorder),
-        boxShadow: const [
-          BoxShadow(color: Color(0x18000000), blurRadius: 6, offset: Offset(0, 2)),
-        ],
-      ),
+        child: Container(
+          height: 80,
+          padding: const EdgeInsets.symmetric(horizontal: 26),
+          decoration: BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: AppColors.headerBorder),
+            boxShadow: const [
+              BoxShadow(color: Color(0x18000000), blurRadius: 6, offset: Offset(0, 2)),
+            ],
+          ),
       child: Row(
         children: [
           Container(
@@ -64,6 +71,8 @@ class ConnectionHeaderCard extends StatelessWidget {
           ),
         ],
       ),
+    ),
+    ),
     );
   }
 }
